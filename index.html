@@ -628,8 +628,8 @@
     .progress-ring .fg {
       stroke: var(--cyan);
       stroke-linecap: round;
-      stroke-dasharray: 157;
-      stroke-dashoffset: 157;
+      stroke-dasharray: 157.08;
+      stroke-dashoffset: 157.08;
       transition: stroke-dashoffset 0.15s ease;
       filter: drop-shadow(0 0 4px var(--cyan-glow));
     }
@@ -652,6 +652,7 @@
       color: var(--cyan);
       margin-bottom: 0.25rem;
       min-height: 1.3em;
+      transition: opacity 0.15s ease;
     }
     .scanner-status::after {
       content: '|';
@@ -861,6 +862,15 @@
       .cta-btn { padding: 1rem 2rem; font-size: 0.95rem; }
       .hero h1 { font-size: 1.8rem; }
     }
+
+    /* Accessibility: respect reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1007,6 +1017,8 @@
 
     let selectedIndex = -1;
     let scanTimeouts = [];
+    let isScanning = false;
+    let counterInterval = null;
 
     /* ========== TIMESTAMP ========== */
     function updateTimestamp() {
@@ -1055,6 +1067,7 @@
 
     /* ========== PHOTO SELECTION ========== */
     function selectPhoto(index) {
+      if (isScanning) return;
       selectedIndex = index;
       closeModal();
       setTimeout(() => startScanning(index), 600);
@@ -1076,7 +1089,9 @@
       scanTimeouts = [];
       container.querySelectorAll('.bbox').forEach(el => el.remove());
 
+      isScanning = true;
       scanImg.src = PHOTOS[index].src;
+      scanImg.onerror = () => { scanImg.style.background = 'linear-gradient(135deg, var(--deep), var(--slate))'; };
       view.classList.add('active');
 
       // Update edge data
@@ -1134,6 +1149,7 @@
       // End scan → result
       scanTimeouts.push(setTimeout(() => {
         clearInterval(barsInterval);
+        isScanning = false;
         view.classList.remove('active');
         grid.classList.remove('active');
         line.classList.remove('active');
@@ -1187,19 +1203,21 @@
       view.classList.add('active');
 
       // Animated counter
+      if (counterInterval) clearInterval(counterInterval);
       const el = document.getElementById('resultDiscount');
       let current = 0;
       const target = data.discount;
       const steps = 40;
       const step = target / steps;
       let count = 0;
-      const interval = setInterval(() => {
+      counterInterval = setInterval(() => {
         count++;
         current = Math.min(current + step, target);
         el.textContent = Math.round(current) + '%';
         if (count >= steps) {
           el.textContent = target + '%';
-          clearInterval(interval);
+          clearInterval(counterInterval);
+          counterInterval = null;
         }
       }, 25);
 
@@ -1244,14 +1262,25 @@
     function copyCode() {
       const code = document.getElementById('promoCode').textContent;
       const btn = document.getElementById('copyBtn');
-      navigator.clipboard.writeText(code).then(() => {
+      const showCopied = () => {
         btn.textContent = '¡Copiado!';
         btn.classList.add('copied');
-        setTimeout(() => {
-          btn.textContent = 'Copiar';
-          btn.classList.remove('copied');
-        }, 2000);
-      });
+        setTimeout(() => { btn.textContent = 'Copiar'; btn.classList.remove('copied'); }, 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(showCopied).catch(showCopied);
+      } else {
+        // Fallback for file:// protocol
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showCopied();
+      }
     }
 
     /* ========== RESET ========== */
@@ -1259,6 +1288,8 @@
       scanTimeouts.forEach(t => clearTimeout(t));
       scanTimeouts = [];
       clearInterval(barsInterval);
+      if (counterInterval) { clearInterval(counterInterval); counterInterval = null; }
+      isScanning = false;
 
       document.getElementById('resultView').classList.remove('active');
       document.getElementById('scannerView').classList.remove('active');
